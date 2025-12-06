@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from enum import Enum
 from tempfile import NamedTemporaryFile
 from typing import Any, Dict, Generator, Iterable, List, Optional
+import json
 
 import requests
 from bs4 import BeautifulSoup
@@ -23,7 +24,7 @@ from mastodon import (
 )
 from pydub import AudioSegment
 
-from .orm import Account, Client, DmChat, session_scope
+from .orm import Account, Client, Hashtags, DmChat, session_scope
 
 SPAM = [
     "/fediversechick/",
@@ -308,7 +309,10 @@ def _check_mastodon(bot: Bot, args: Namespace) -> None:
                     if muted_home:
                         bot.logger.debug(f"contactid={conid}: Ignoring Home timeline (muted)")
                     else:
-                        _check_home(bot, accid, masto, conid, home_chat, last_home)
+                        _check_home(bot, accid, masto, conid, home_chat, last_home, muted_home)
+
+                    _check_hashtags(bot, accid, masto, conid)
+
                     bot.logger.debug(f"contactid={conid}: Done checking account")
                 except MastodonUnauthorizedError as ex:
                     bot.logger.exception(ex)
@@ -392,7 +396,7 @@ def get_mastodon(api_url: str, token: Optional[str] = None, **kwargs) -> Mastodo
     return Mastodon(
         access_token=token,
         api_base_url=api_url,
-        ratelimit_method="throw",
+        ratelimit_method="wait",
         session=web,
         **kwargs,
     )
@@ -570,7 +574,7 @@ def _check_notifications(
 
 
 def _check_home(
-    bot: Bot, accid: int, masto: Mastodon, conid: int, home_chat: int, last_id: str
+    bot: Bot, accid: int, masto: Mastodon, conid: int, home_chat: int, last_id: str, muted_home: bool
 ) -> None:
     me = masto.me()
     bot.logger.debug(f"contactid={conid}: Getting Home timeline (last_id={last_id})")
@@ -580,7 +584,39 @@ def _check_home(
             acc = session.query(Account).filter_by(id=conid).first()
             acc.last_home = last_id = toots[0].id
         toots = [toot for toot in toots if me.id not in [acc.id for acc in toot.mentions]]
+
     bot.logger.debug(f"contactid={conid}: Home: {len(toots)} new entries (last_id={last_id})")
     if toots:
+	    for reply in toots2replies(bot, reversed(toots)):
+	        bot.rpc.send_msg(accid, home_chat, reply)
+
+def _check_hashtags(
+    bot: Bot, accid: int, masto: Mastodon, conid: int
+) -> None:
+    chats = []
+    with session_scope() as session:
+        hashtags_chats = session.query(Hashtags).filter_by(contactid=conid)
+        for chat in hashtags_chats:
+            chats.append((chat.last, chat.chat_id))
+
+    for (last, chat_id) in chats:
+        toots = []
+        info = bot.rpc.get_basic_chat_info(accid, chat_id)
+        tags = [tag for tag in re.split(r'\W+', info.name) if tag != '']
+        bot.logger.debug(f"contactid={conid}: Getting {len(tags)} hashtag timelines in {len(chats)} chats")
+
+        lasts = json.loads(last if last else "{}")
+        newlasts = {}
+
+        for tag in tags:
+            t = masto.timeline_hashtag(tag, min_id=lasts.get(tag), limit=100)
+            toots.extend(t)
+            newlasts[tag] = t[0].id if t else lasts.get(tag)
+
+        bot.logger.debug(f"{len(toots)} toots matching {info.name}")
         for reply in toots2replies(bot, reversed(toots)):
-            bot.rpc.send_msg(accid, home_chat, reply)
+            bot.rpc.send_msg(accid, chat_id, reply)
+
+        with session_scope() as session:
+            chat = session.query(Hashtags).filter_by(chat_id=chat_id).first()
+            chat.last = json.dumps(newlasts)
