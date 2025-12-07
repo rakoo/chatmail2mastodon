@@ -611,8 +611,11 @@ def _check_hashtags(
 
         for tag in tags:
             t = masto.timeline_hashtag(tag, min_id=lasts.get(tag), limit=100)
-            toots.extend(t)
+            toots.extend([tt for tt in t if tt.id not in [to.id for to in toots]]) # Remove duplicates
             newlasts[tag] = t[0].id if t else lasts.get(tag)
+
+        # re-sort
+        toots.sort(key=lambda s: s.edited_at if s.edited_at else s.created_at)
 
         bot.logger.debug(f"{len(toots)} toots matching {info.name}")
         for reply in toots2replies(bot, reversed(toots)):
