@@ -21,6 +21,7 @@ from mastodon import (
     MastodonNetworkError,
     MastodonServerError,
     MastodonUnauthorizedError,
+    MastodonRatelimitError
 )
 from pydub import AudioSegment
 
@@ -333,7 +334,7 @@ def _check_mastodon(bot: Bot, args: Namespace) -> None:
                     chatid = bot.rpc.create_chat_by_contact_id(accid, conid)
                     text = f"❌ ERROR Your account was logged out: {ex}"
                     bot.rpc.send_msg(accid, chatid, MsgData(text=text))
-                except (MastodonNetworkError, MastodonServerError) as ex:
+                except (MastodonNetworkError, MastodonServerError, MastodonRatelimitError) as ex:
                     bot.logger.exception(ex)
                 except Exception as ex:  # noqa
                     bot.logger.exception(ex)
@@ -396,7 +397,7 @@ def get_mastodon(api_url: str, token: Optional[str] = None, **kwargs) -> Mastodo
     return Mastodon(
         access_token=token,
         api_base_url=api_url,
-        ratelimit_method="wait",
+        ratelimit_method="throw",
         session=web,
         **kwargs,
     )
