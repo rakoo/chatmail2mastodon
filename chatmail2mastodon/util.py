@@ -10,6 +10,7 @@ from enum import Enum
 from tempfile import NamedTemporaryFile
 from typing import Any, Dict, Generator, Iterable, List, Optional
 import json
+import random
 
 import requests
 from bs4 import BeautifulSoup
@@ -600,7 +601,8 @@ def _check_hashtags(
         for chat in hashtags_chats:
             chats.append((chat.last, chat.chat_id))
 
-    for (last, chat_id) in chats:
+    # Randomize chats to have a chance to check them all in case of throttling
+    for (last, chat_id) in random.sample(chats, k=len(chats)):
         toots = []
         info = bot.rpc.get_basic_chat_info(accid, chat_id)
         tags = [tag for tag in re.split(r'\W+', info.name) if tag != '']
