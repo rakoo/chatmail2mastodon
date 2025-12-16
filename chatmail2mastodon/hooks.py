@@ -102,6 +102,10 @@ def on_added(bot: Bot, accid: int, event: CoreEvent) -> None:
         if len(contact_ids) != 1:
             return
 
+        info = bot.rpc.get_basic_chat_info(accid, chatid)
+        tags = re.split(r'[ ,]+', info.name)
+        if False in [tag.startswith('#') for tag in tags]:
+            return
         hashtags = session.query(Hashtags).filter_by(chat_id=chatid).first()
         if not hashtags:
 
