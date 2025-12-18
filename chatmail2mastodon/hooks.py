@@ -4,6 +4,7 @@ import os
 from argparse import Namespace
 from pathlib import Path
 from threading import Thread
+import re
 
 import mastodon
 from deltachat2 import (
@@ -104,11 +105,11 @@ def on_added(bot: Bot, accid: int, event: CoreEvent) -> None:
 
         info = bot.rpc.get_basic_chat_info(accid, chatid)
         tags = re.split(r'[ ,]+', info.name)
-        if False in [tag.startswith('#') for tag in tags]:
+        if len(info.name.strip()) == 0 or False in [tag.startswith('#') for tag in tags]:
             return
+
         hashtags = session.query(Hashtags).filter_by(chat_id=chatid).first()
         if not hashtags:
-
             contact_id = contact_ids[0]
             session.add(Hashtags(chat_id=chatid, contactid=contact_id))
 
