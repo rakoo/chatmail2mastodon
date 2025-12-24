@@ -101,8 +101,10 @@ def toot2reply(toot: AttribAccessDict) -> MsgData:
         reply.override_sender_name = _get_name(toot.account)
 
     if toot.media_attachments:
-        reply.file = toot.media_attachments.pop(0).url
-        text += "\n".join(media.url for media in toot.media_attachments) + "\n\n"
+        first = toot.media_attachments.pop(0)
+        reply.file = first.url
+        text += f"[{first.description}]\n\n"
+        text += "\n\n".join(f"{media.url}\n[{media.description}]" for media in toot.media_attachments) + "\n\n"
 
     soup = BeautifulSoup(toot.content, "html.parser")
     if toot.mentions:
