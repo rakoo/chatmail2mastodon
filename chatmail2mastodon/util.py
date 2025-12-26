@@ -103,8 +103,8 @@ def toot2reply(toot: AttribAccessDict) -> MsgData:
     if toot.media_attachments:
         first = toot.media_attachments.pop(0)
         reply.file = first.url
-        text += f"[{first.description}]\n\n"
-        text += "\n\n".join(f"{media.url}\n[{media.description}]" for media in toot.media_attachments) + "\n\n"
+        text += f"[{first.description or 'no alt'}]\n\n"
+        text += "\n\n".join(f"{media.url}\n[{media.description or 'no alt'}]" for media in toot.media_attachments) + "\n\n"
 
     soup = BeautifulSoup(toot.content, "html.parser")
     if toot.mentions:
