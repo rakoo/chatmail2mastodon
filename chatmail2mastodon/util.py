@@ -102,7 +102,9 @@ def toot2reply(toot: AttribAccessDict) -> MsgData:
 
     if toot.media_attachments:
         first = toot.media_attachments.pop(0)
-        reply.file = first.url
+        reply.file = first.preview_url or first.preview_remote_url or first.url
+        if reply.file != first.url:
+            text += first.url + "\n"
         text += f"[{first.description or 'no alt'}]\n\n"
         text += "\n\n".join(f"{media.url}\n[{media.description or 'no alt'}]" for media in toot.media_attachments) + "\n\n"
 
