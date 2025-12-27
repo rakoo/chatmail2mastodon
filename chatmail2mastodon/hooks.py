@@ -4,6 +4,7 @@ import os
 from argparse import Namespace
 from pathlib import Path
 from threading import Thread
+import re
 
 import mastodon
 from deltachat2 import (
@@ -22,7 +23,7 @@ from rich.logging import RichHandler
 
 from .cli import cli
 from .migrations import run_migrations
-from .orm import Account, DmChat, OAuth, initdb, session_scope
+from .orm import Account, DmChat, OAuth, Hashtags, initdb, session_scope
 from .util import (
     TOOT_SEP,
     Visibility,
@@ -82,9 +83,44 @@ def log_event(bot: Bot, accid: int, event: CoreEvent) -> None:
                 chatid = bot.rpc.create_chat_by_contact_id(accid, event.contact_id)
                 send_help(bot, accid, chatid)
 
+@cli.on(events.RawEvent(types=EventType.CHAT_MODIFIED))
+def on_added(bot: Bot, accid: int, event: CoreEvent) -> None:
+    """Process member-added messages"""
+    chatid = event.chat_id
+
+    with session_scope() as session:
+        dmchat = session.query(DmChat).filter_by(chat_id=chatid).first()
+        if dmchat:
+            return
+        home = session.query(Account).filter_by(home=chatid).first()
+        if home:
+            return
+        notif = session.query(Account).filter_by(notifications=chatid).first()
+        if notif:
+            return
+
+        contact_ids = [c for c in bot.rpc.get_chat_contacts(accid, chatid) if c != SpecialContactId.SELF]
+        if len(contact_ids) != 1:
+            return
+
+        info = bot.rpc.get_basic_chat_info(accid, chatid)
+        tags = re.split(r'[ ,]+', info.name)
+        if len(info.name.strip()) == 0 or False in [tag.startswith('#') for tag in tags]:
+            return
+
+        hashtags = session.query(Hashtags).filter_by(chat_id=chatid).first()
+        if not hashtags:
+            contact_id = contact_ids[0]
+            session.add(Hashtags(chat_id=chatid, contactid=contact_id))
+
+            try:
+                bot.rpc.set_chat_profile_image(accid, chatid, MASTODON_LOGO)
+            except Exception as err:
+                bot.logger.exception(err)
+
 
 @cli.on(events.NewMessage(is_info=True))
-def on_info_msg(bot: Bot, accid: int, event: NewMsgEvent) -> None:
+def on_removed(bot: Bot, accid: int, event: NewMsgEvent) -> None:
     """Process member-removed messages"""
     msg = event.msg
     chatid = msg.chat_id
@@ -120,6 +156,11 @@ def on_info_msg(bot: Bot, accid: int, event: NewMsgEvent) -> None:
             if dmchat:
                 chats.append(chatid)
                 session.delete(dmchat)
+            else:
+                hashtags = session.query(Hashtags).filter_by(chat_id=chatid).first()
+                if hashtags:
+                    chats.append(chatid)
+                    session.delete(hashtags)
 
     for chatid in chats:
         try:
@@ -745,6 +786,8 @@ Use /login to log in, once you log in with your Mastodon credentials, two chats 
     • The Notifications chat is where you will receive your Mastodon notifications.
 
     When a Mastodon user writes a private/direct message to you, a chat will be created for your private conversation with that user.
+
+    To follow hashtags, create a group with you and the bot, set the name to the hashtags you want to follow separated by a space (for example "#deltachat #chatmail", you can change anytime). You can create as many groups as you want.
 
 **Available commands**
 

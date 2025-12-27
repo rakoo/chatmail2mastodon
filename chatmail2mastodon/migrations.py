@@ -149,3 +149,16 @@ def migrate3(bot: Bot, database: sqlite3.Connection) -> None:
                 (conid, row["url"], row["user"], row["client_id"], row["client_secret"]),
             )
         database.execute("DROP TABLE old_oauth")
+
+
+def migrate4(bot: Bot, database: sqlite3.Connection) -> None:
+    database.execute(
+        """"
+        CREATE TABLE hashtags (
+                    chat_id INTEGER PRIMARY KEY,
+                    contactid INTEGER NOT NULL,
+                    last VARCHAR(1000),
+                    Foreign KEY(contactid) REFERENCES account (id)
+            )
+        """
+    )

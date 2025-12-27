@@ -68,6 +68,14 @@ If someone sends you a direct message in a private 1:1 conversation, it will be 
 
 and the chat with "friend@example.com" will pop up.
 
+You can follow hashtags and group of hashtags. To do that:
+
+1. Create a group with the bot
+2. Set the name of the group with the hashtags you want to follow separated by a space, for example "#deltachat #chatmail"
+3. Send a message to send the group creation to the bot.
+
+The bot will set the group avatar to the same as the "Home" and "Notifications" avatar. Every message that matches any of the hashtags will be sent in the group. To follow other hashtags you can modify the name or create other groups. To stop any following in a chat, just leave the chat.
+
 To logout from your account:
 
 ```

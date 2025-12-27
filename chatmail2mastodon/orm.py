@@ -24,7 +24,7 @@ class Account(Base):
     muted_notif = Column(Boolean)
 
     dm_chats = relationship("DmChat", backref="account", cascade="all, delete, delete-orphan")
-
+    hashtags = relationship("Hashtags", backref="account", cascade="all, delete, delete-orphan")
 
 class DmChat(Base):
     __tablename__ = "dmchat"
@@ -32,6 +32,11 @@ class DmChat(Base):
     contactid = Column(Integer, ForeignKey("account.id"), nullable=False)
     contact = Column(String(1000), nullable=False)
 
+class Hashtags(Base):
+    __tablename__ = "hashtags"
+    chat_id = Column(Integer, primary_key=True)
+    contactid = Column(Integer, ForeignKey("account.id"), nullable=False)
+    last = Column(String(1000))
 
 class OAuth(Base):
     __tablename__ = "oauth"

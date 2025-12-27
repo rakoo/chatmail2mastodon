@@ -9,6 +9,8 @@ from contextlib import contextmanager
 from enum import Enum
 from tempfile import NamedTemporaryFile
 from typing import Any, Dict, Generator, Iterable, List, Optional
+import json
+import random
 
 import requests
 from bs4 import BeautifulSoup
@@ -20,10 +22,11 @@ from mastodon import (
     MastodonNetworkError,
     MastodonServerError,
     MastodonUnauthorizedError,
+    MastodonRatelimitError
 )
 from pydub import AudioSegment
 
-from .orm import Account, Client, DmChat, session_scope
+from .orm import Account, Client, Hashtags, DmChat, session_scope
 
 SPAM = [
     "/fediversechick/",
@@ -76,7 +79,7 @@ def toots2replies(bot: Bot, toots: Iterable) -> Generator:
                 with download_file(reply.file) as path:
                     reply.file = path
                     yield reply
-                return
+                    continue
             except Exception as ex:
                 bot.logger.exception(ex)
                 text = reply.text or ""
@@ -98,8 +101,12 @@ def toot2reply(toot: AttribAccessDict) -> MsgData:
         reply.override_sender_name = _get_name(toot.account)
 
     if toot.media_attachments:
-        reply.file = toot.media_attachments.pop(0).url
-        text += "\n".join(media.url for media in toot.media_attachments) + "\n\n"
+        first = toot.media_attachments.pop(0)
+        reply.file = first.preview_url or first.preview_remote_url or first.url
+        if reply.file != first.url:
+            text += first.url + "\n"
+        text += f"[{first.description or 'no alt'}]\n\n"
+        text += "\n\n".join(f"{media.url}\n[{media.description or 'no alt'}]" for media in toot.media_attachments) + "\n\n"
 
     soup = BeautifulSoup(toot.content, "html.parser")
     if toot.mentions:
@@ -308,7 +315,10 @@ def _check_mastodon(bot: Bot, args: Namespace) -> None:
                     if muted_home:
                         bot.logger.debug(f"contactid={conid}: Ignoring Home timeline (muted)")
                     else:
-                        _check_home(bot, accid, masto, conid, home_chat, last_home)
+                        _check_home(bot, accid, masto, conid, home_chat, last_home, muted_home)
+
+                    _check_hashtags(bot, accid, masto, conid)
+
                     bot.logger.debug(f"contactid={conid}: Done checking account")
                 except MastodonUnauthorizedError as ex:
                     bot.logger.exception(ex)
@@ -329,7 +339,7 @@ def _check_mastodon(bot: Bot, args: Namespace) -> None:
                     chatid = bot.rpc.create_chat_by_contact_id(accid, conid)
                     text = f"❌ ERROR Your account was logged out: {ex}"
                     bot.rpc.send_msg(accid, chatid, MsgData(text=text))
-                except (MastodonNetworkError, MastodonServerError) as ex:
+                except (MastodonNetworkError, MastodonServerError, MastodonRatelimitError) as ex:
                     bot.logger.exception(ex)
                 except Exception as ex:  # noqa
                     bot.logger.exception(ex)
@@ -570,7 +580,7 @@ def _check_notifications(
 
 
 def _check_home(
-    bot: Bot, accid: int, masto: Mastodon, conid: int, home_chat: int, last_id: str
+    bot: Bot, accid: int, masto: Mastodon, conid: int, home_chat: int, last_id: str, muted_home: bool
 ) -> None:
     me = masto.me()
     bot.logger.debug(f"contactid={conid}: Getting Home timeline (last_id={last_id})")
@@ -580,7 +590,43 @@ def _check_home(
             acc = session.query(Account).filter_by(id=conid).first()
             acc.last_home = last_id = toots[0].id
         toots = [toot for toot in toots if me.id not in [acc.id for acc in toot.mentions]]
+
     bot.logger.debug(f"contactid={conid}: Home: {len(toots)} new entries (last_id={last_id})")
     if toots:
+	    for reply in toots2replies(bot, reversed(toots)):
+	        bot.rpc.send_msg(accid, home_chat, reply)
+
+def _check_hashtags(
+    bot: Bot, accid: int, masto: Mastodon, conid: int
+) -> None:
+    chats = []
+    with session_scope() as session:
+        hashtags_chats = session.query(Hashtags).filter_by(contactid=conid)
+        for chat in hashtags_chats:
+            chats.append((chat.last, chat.chat_id))
+
+    # Randomize chats to have a chance to check them all in case of throttling
+    for (last, chat_id) in random.sample(chats, k=len(chats)):
+        toots = []
+        info = bot.rpc.get_basic_chat_info(accid, chat_id)
+        tags = [tag for tag in re.split(r'\W+', info.name) if tag != '']
+        bot.logger.debug(f"contactid={conid}: Getting {len(tags)} hashtag timelines in {len(chats)} chats")
+
+        lasts = json.loads(last if last else "{}")
+        newlasts = {}
+
+        for tag in tags:
+            t = masto.timeline_hashtag(tag, min_id=lasts.get(tag), limit=100)
+            toots.extend([tt for tt in t if tt.id not in [to.id for to in toots]]) # Remove duplicates
+            newlasts[tag] = t[0].id if t else lasts.get(tag)
+
+        # re-sort
+        toots.sort(key=lambda s: s.edited_at if s.edited_at else s.created_at)
+
+        bot.logger.debug(f"{len(toots)} toots matching {info.name}")
         for reply in toots2replies(bot, reversed(toots)):
-            bot.rpc.send_msg(accid, home_chat, reply)
+            bot.rpc.send_msg(accid, chat_id, reply)
+
+        with session_scope() as session:
+            chat = session.query(Hashtags).filter_by(chat_id=chat_id).first()
+            chat.last = json.dumps(newlasts)
