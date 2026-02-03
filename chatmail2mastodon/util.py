@@ -11,6 +11,7 @@ from tempfile import NamedTemporaryFile
 from typing import Any, Dict, Generator, Iterable, List, Optional
 import json
 import random
+from PIL import Image
 
 import requests
 from bs4 import BeautifulSoup
@@ -189,13 +190,21 @@ def get_user(m, user_id) -> Any:
 
 @contextmanager
 def download_file(url: str, default_extension="") -> Generator[str, None, None]:
-    """Download a blob and save it in temporary file."""
+    """Download a blob, reduce its size, and save it in temporary file."""
     with web.get(url) as resp:
         ext = get_extension(resp) or default_extension
         content = resp.content
     with NamedTemporaryFile(suffix=ext) as temp_file:
         temp_file.write(content)
         temp_file.flush()
+        try:
+            im = Image.open(temp_file.name)
+            im.thumbnail((600, 600))
+            im.save(temp_file.name)
+        except Exception:
+            # don't do anything if the file isn't an image that can't be compressed
+            pass
+
         try:
             yield temp_file.name
         except GeneratorExit:
